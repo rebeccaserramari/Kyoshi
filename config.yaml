@@ -1,0 +1,18 @@
+
+chromosomes = [str(i) for i in range(1,23)]
+samples= ["NA19239"]
+haplos = ["h1","h2"]
+
+#adjust in case different populations are needed
+pops = ["AFR","AMR","EUR","EAS","SAS"]
+
+callset_file = "callset_filename"
+callset_file_unzipped = "callset_filename_unzipped"
+callset_folder = "path_to_callset"
+results = "path_to_result_folder"
+panel = "path_to_referencepanel"
+result_plots = "path_to_result_plots"
+populationfile = "path_to_populationfile"
+
+NSAMPLES = 30
+BOOTSTRAP=[str(i) for i in range(10)]

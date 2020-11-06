@@ -1,0 +1,160 @@
+import sys
+import logging
+import itertools
+import operator
+import gc
+import math
+from sys import getsizeof, stderr
+import random
+from difflib import SequenceMatcher
+from operator import itemgetter
+from collections import defaultdict
+from itertools import chain, groupby
+import statistics
+try:
+	from reprlib import repr
+except ImportError:
+	pass
+
+def map_index_to_pop(popfile):
+	mapping = dict()
+	with open(popfile) as f:
+		for i,line in enumerate(f):
+			if (i>=0):
+				pop = line.strip().split('\t')[1]
+				mapping[i] = pop
+	
+	return(mapping)	
+
+
+def compute_probabilities(probfile, popfile, variants, path, haplo):
+
+	length = 0
+	varnumber = 0
+	#compute number of variants (rows in the posterior matrix) and number of samples (columns) 
+	with open(probfile) as f:
+		for i,line in enumerate(f):
+			if (i==0):
+				length = len([element for element in line.strip().split(',')])-1
+			varnumber = i+1
+	print("number of variants: ", varnumber)
+	print("number of samples: ", length)
+	mapping = map_index_to_pop(popfile)
+
+	#compute every haplotype in the panel back to the sample by dividing index//2, compute corresponding populations for each path position
+	pop_path = [mapping[i//2] for i in range(length-1)]
+	
+	#map each population to the list of indices in the sample list, containing positions with samples that belong to this population
+	pop_to_indices = defaultdict(list)
+	for i in range(len(pop_path)):
+		pop_to_indices[pop_path[i]].append(i)
+
+	pop_to_sum = {}
+	maxlist = []
+	variant_to_poplist = defaultdict()
+
+	pop_to_sumlist = defaultdict(list)
+	var_number = 0
+	for pop in pop_to_indices.keys():
+		sumlist = []
+		#for every population, sum up the probabilities belonging to this population for every variant
+		with open(probfile) as f:
+			#compute sumlist containing the sum of probabilities belonging to one population at each position
+			for i, line in enumerate(f):
+				probs = [math.exp(float(element)) for element in line.strip().split(',')[:-1]]
+				indexlist = pop_to_indices[pop]
+				probability_sum = probs[indexlist[0]] 
+				for index in indexlist[1:]:
+					probability_sum += probs[index]
+				sumlist.append(probability_sum)
+			pop_to_sumlist[pop] = sumlist
+			var_number = len(pop_to_sumlist[pop])
+
+	#map each superpopulation to its list of populations
+	superpop_to_poplist = defaultdict(list)
+	for pop in pop_to_sumlist.keys():
+		superpop = map_superpopulation(pop)[1]
+		superpop_to_poplist[superpop].append(pop)
+
+	#adds the single sumlists of each population belonging to one superpopulation
+	superpop_to_sumlist = defaultdict(list)
+	for superpop in superpop_to_poplist.keys():
+		sums = [0 for i in range(var_number)]
+		for pop in superpop_to_poplist[superpop]:
+			sums=[x+y for x,y in zip(sums,pop_to_sumlist[pop])]
+		superpop_to_sumlist[superpop] = sums
+
+	#compute a normalization constant as the sum of all elements in a column, i.e. the sum of all probabilities of each variant
+	normalization_constants = {}
+	for i in range(var_number):
+		const = 0
+		for superpop in superpop_to_sumlist.keys():
+			const+=superpop_to_sumlist[superpop][i]
+		normalization_constants[i] = const
+
+	#normalize the sumlists so that every probabilities to each variant sum up to 1 	
+	norm_superpop_to_sumlist = defaultdict(list)
+	for superpop in superpop_to_sumlist.keys():
+		sums = [superpop_to_sumlist[superpop][i]/(normalization_constants[i]) for i in range(len(superpop_to_sumlist[superpop]))]
+		norm_superpop_to_sumlist[superpop] = sums
+
+	#compute maximum values (superpop and its probability that is maximal) for each variant	
+	maxvalues = []
+	maxresults = []
+	for i in range(var_number):
+		maxlist = []
+		for superpop in norm_superpop_to_sumlist.keys():
+			maxlist.append((superpop,norm_superpop_to_sumlist[superpop][i] ))
+		assert(int(round(sum(item for _,item in maxlist))) == 1)
+		(maxindex, maxvalue) = max(maxlist,key=lambda item:item[1])
+		maxvalues.append(maxvalue)
+		maxresults.append((maxindex,maxvalue))
+	
+
+	superpops = sorted(list(norm_superpop_to_sumlist.keys()))
+	#expecting AFR, AMR, EUR order?	
+	#for 5 populations, expect AFR, AMR, EAS, EUR, SAS
+	print("superpops: ", superpops)
+#	with open(path+haplo+"_probabilities",'w') as outfile:
+	with open(path,'w') as outfile:
+		for j in range(len(variants)):
+			line = str(variants[j])+'\t'+str(j)+'\t'
+			for pop in superpops:
+				sumlist = norm_superpop_to_sumlist[pop]
+				summe = round(sumlist[j],4)
+				line += str(summe)+'\t'
+			line += '\n'
+			outfile.write(line)
+
+
+
+def map_superpopulation(pop):
+	map_pop_to_super = dict()
+	AFR = ({'YRI','LWK','GWD','MSL','ESN','ASW','ACB'}, 1, 'AFR')
+	AMR = ({'MXL','PUR','CLM','PEL','IND'}, 2, 'AMR')
+	SAS = ({'GIH','PJL','BEB','STU','ITU'}, 3, 'SAS')
+	EUR = ({'CEU','TSI','FIN','GBR','IBS'}, 4, 'EUR')
+	EAS = ({'CHB','JPT','CHS','CDX','KHV'}, 5, 'EAS')
+	super_pops = [AFR, AMR, SAS, EUR, EAS]
+	for super_pop in super_pops:
+		if pop in super_pop[0]:
+			return(super_pop[1],super_pop[2])
+
+
+if __name__ == "__main__":
+	probfile = sys.argv[1]
+	popfile = sys.argv[2]
+
+	variantfile = sys.argv[3]
+	path = sys.argv[4]
+	haplo = sys.argv[5]	
+	
+	variants = []
+	with open(variantfile) as f:
+		for i,line in enumerate(f):
+			variants = [int(var) for var in line.strip().split(',')]
+
+	assert(variants == sorted(variants))
+	
+	compute_probabilities(probfile, popfile, variants, path, haplo)
+

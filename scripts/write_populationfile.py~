@@ -1,0 +1,38 @@
+import sys
+import math
+import random
+from collections import defaultdict
+
+
+def write_populationfile(samplefile, popfile, outfile):
+	with open(samplefile) as sams:
+		samplenames = sams.read().splitlines()
+	lines = []
+	gender = {'F':'female','M':'male'}
+#	for j in range(len(samplenames)):
+#		#check for SGDP samples in the sampleset
+#		if (samplenames[j][-1] =="F" or samplenames[j][-1] =="M"):
+#			newline = samplenames[j]+'\t'+'IND\t'+'AMR\t'+gender[samplenames[j][-1]]+'\n'
+#			lines.append(newline)
+#		with open(popfile) as f:
+#			for i, line in enumerate(f):
+#				if (line.strip().split()[0] == samplenames[j]):
+#					lines.append(line)
+
+	with open(popfile) as f:
+		for i,line in enumerate(f):
+			if (line.strip().split()[0] in samplenames):
+				lines.append(line)
+	
+	with open(outfile,'w') as ofile:
+		for line in lines:
+			ofile.write(line)
+
+	return()
+
+
+if __name__ == '__main__':
+	samplefile = sys.argv[1]
+	popfile = sys.argv[2]
+	outfile = sys.argv[3]
+	write_populationfile(samplefile, popfile, outfile)	
